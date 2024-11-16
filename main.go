@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/playwright-community/playwright-go"
@@ -14,9 +15,27 @@ import (
 var srmPage playwright.Page
 var captchaPath = "./captcha.jpg"
 
+func installPlaywright() {
+	log.Println("Installing Playwright and browsers...")
+	cmd := exec.Command("sh", "-c", "npm install -g playwright && npx playwright install")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Fatalf("Failed to install Playwright: %v\nOutput: %s", err, string(output))
+	}
+	log.Println("Playwright installed successfully.")
+}
+
 func main() {
 	// Initialize Playwright
+	installPlaywright()
+
 	pw, err := playwright.Run()
+	if err != nil {
+		log.Fatalf("Could not start Playwright: %v", err)
+	}
+	defer pw.Stop()
+
+	pw, err = playwright.Run()
 	if err != nil {
 		log.Fatalf("Could not start Playwright: %v", err)
 	}

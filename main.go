@@ -15,6 +15,7 @@ import (
 var srmPage playwright.Page
 var captchaPath = "./captcha.jpg"
 
+// Install Playwright and required browsers
 func installPlaywright() {
 	log.Println("Installing Playwright and browsers...")
 	cmd := exec.Command("sh", "-c", "npm install -g playwright && npx playwright install")
@@ -26,16 +27,10 @@ func installPlaywright() {
 }
 
 func main() {
-	// Initialize Playwright
 	installPlaywright()
 
+	// Initialize Playwright
 	pw, err := playwright.Run()
-	if err != nil {
-		log.Fatalf("Could not start Playwright: %v", err)
-	}
-	defer pw.Stop()
-
-	pw, err = playwright.Run()
 	if err != nil {
 		log.Fatalf("Could not start Playwright: %v", err)
 	}
@@ -80,11 +75,16 @@ func main() {
 	http.HandleFunc("/submit_login", submitLogin)
 
 	// Start the HTTP server
-	log.Println("Server running at http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+		log.Printf("Defaulting to port %s", port)
+	}
+	log.Printf("Server running at http://localhost:%s", port)
+	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
-// Capture CAPTCHA and save it to captchaPath
+// Capture the CAPTCHA and save it locally
 func captureCaptcha() {
 	captchaElement, err := srmPage.QuerySelector("img[src*='captchas']")
 	if err != nil || captchaElement == nil {
@@ -108,30 +108,30 @@ func serveLoginPage(w http.ResponseWriter, r *http.Request) {
 	<html lang="en">
 	<head>
 	    <meta charset="UTF-8">
-	    <title>OASYS</title>
+	    <title>OASYS Login</title>
 	    <script>
 	        function reloadCaptcha() {
 	            fetch('/reload_captcha', { method: 'POST' })
 	                .then(response => {
 	                    if (response.ok) {
 	                        const captchaImage = document.querySelector("img[src='/captcha.jpg']");
-	                        captchaImage.src = "/captcha.jpg?ts=" + new Date().getTime(); // Add timestamp to prevent caching
+	                        captchaImage.src = "/captcha.jpg?ts=" + new Date().getTime(); // Prevent caching
 	                    } else {
 	                        alert("Failed to reload CAPTCHA");
 	                    }
 	                })
-	                .catch(err => alert("Please reload the page"));
+	                .catch(err => alert("Error: " + err));
 	        }
 	    </script>
 	</head>
 	<body>
-	    <h2>OASYS login</h2>
+	    <h2>OASYS Login</h2>
 	    <form action="/submit_login" method="POST">
-	        <label for="netid">NetID (without '@srmist.edu.in')</label>
+	        <label for="netid">NetID:</label>
 	        <input type="text" id="netid" name="netid" required>
-	        <label for="password">Password</label>
+	        <label for="password">Password:</label>
 	        <input type="password" id="password" name="password" required>
-	        <label for="captcha">Enter CAPTCHA</label>
+	        <label for="captcha">CAPTCHA:</label>
 	        <input type="text" id="captcha" name="captcha" required>
 	        <br>
 	        <img src="/captcha.jpg?ts={{.}}" alt="CAPTCHA Image" style="border: 1px solid #000;">
@@ -141,7 +141,7 @@ func serveLoginPage(w http.ResponseWriter, r *http.Request) {
 	</body>
 	</html>`)
 	if err != nil {
-		http.Error(w, "Could not parse login template", http.StatusInternalServerError)
+		http.Error(w, "Error generating login page", http.StatusInternalServerError)
 		return
 	}
 	tmpl.Execute(w, timestamp)
@@ -152,30 +152,21 @@ func serveCaptchaImage(w http.ResponseWriter, r *http.Request) {
 	file, err := os.Open(captchaPath)
 	if err != nil {
 		log.Printf("Could not open CAPTCHA image: %v", err)
-		http.Error(w, "Could not open CAPTCHA image", http.StatusInternalServerError)
+		http.Error(w, "CAPTCHA image not found", http.StatusInternalServerError)
 		return
 	}
 	defer file.Close()
 
-	fileInfo, err := file.Stat()
-	if err != nil {
-		log.Printf("Could not get CAPTCHA file info: %v", err)
-		http.Error(w, "Could not get CAPTCHA file info", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "image/jpeg")
-	http.ServeContent(w, r, "captcha.jpg", fileInfo.ModTime(), file)
+	http.ServeFile(w, r, captchaPath)
 }
 
-// Handle CAPTCHA reload
+// Reload the CAPTCHA
 func reloadCaptcha(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Reload the SRM login page
 	_, err := srmPage.Goto("https://sp.srmist.edu.in/srmiststudentportal/students/loginManager/youLogin.jsp", playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateNetworkidle,
 	})
@@ -184,7 +175,6 @@ func reloadCaptcha(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Capture the new CAPTCHA
 	captureCaptcha()
 	w.WriteHeader(http.StatusOK)
 }
@@ -192,7 +182,7 @@ func reloadCaptcha(w http.ResponseWriter, r *http.Request) {
 // Handle login form submission
 func submitLogin(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Unable to parse form", http.StatusBadRequest)
+		http.Error(w, "Invalid form data", http.StatusBadRequest)
 		return
 	}
 
@@ -200,118 +190,29 @@ func submitLogin(w http.ResponseWriter, r *http.Request) {
 	password := r.FormValue("password")
 	captcha := r.FormValue("captcha")
 
-	err := srmPage.Fill("#login", netid)
-	if err != nil {
+	if err := srmPage.Fill("#login", netid); err != nil {
 		http.Error(w, "Could not fill NetID", http.StatusInternalServerError)
 		return
 	}
-
-	err = srmPage.Fill("#passwd", password)
-	if err != nil {
+	if err := srmPage.Fill("#passwd", password); err != nil {
 		http.Error(w, "Could not fill password", http.StatusInternalServerError)
 		return
 	}
-
-	err = srmPage.Fill("#ccode", captcha)
-	if err != nil {
+	if err := srmPage.Fill("#ccode", captcha); err != nil {
 		http.Error(w, "Could not fill CAPTCHA", http.StatusInternalServerError)
 		return
 	}
 
-	err = srmPage.Click("button.btn-custom.btn-user.btn-block.lift")
-	if err != nil {
+	if err := srmPage.Click("button.btn-custom.btn-user.btn-block.lift"); err != nil {
 		http.Error(w, "Could not click login button", http.StatusInternalServerError)
 		return
 	}
 
 	time.Sleep(3 * time.Second)
-
-	// Navigate to the attendance page
-	err = srmPage.Click("#listId9")
-	if err != nil {
-		http.Error(w, "Could not click Attendance Details link", http.StatusInternalServerError)
-		return
-	}
-
-	time.Sleep(3 * time.Second)
-
-	attendanceTableElement, err := srmPage.QuerySelector(".table-responsive.table-billing-history > table")
-	if err != nil {
-		http.Error(w, "Could not query attendance table", http.StatusInternalServerError)
-		return
-	}
-	if attendanceTableElement == nil {
-		http.Error(w, "Attendance table not found", http.StatusInternalServerError)
-		return
-	}
-
-	attendanceRows, err := attendanceTableElement.QuerySelectorAll("tbody tr")
-	if err != nil {
-		http.Error(w, "Could not query attendance rows", http.StatusInternalServerError)
-		return
-	}
-
-	attendanceData := ""
-	for _, row := range attendanceRows {
-		columns, err := row.QuerySelectorAll("td")
-		if err != nil {
-			http.Error(w, "Could not query columns in attendance row", http.StatusInternalServerError)
-			return
-		}
-		if len(columns) == 8 {
-			maxHours, _ := columns[2].InnerText()
-			attHours, _ := columns[3].InnerText()
-			var att, tot int
-			fmt.Sscanf(attHours, "%d", &att)
-			fmt.Sscanf(maxHours, "%d", &tot)
-			margin := calculateMargin(att, tot)
-			rowHTML, _ := row.InnerHTML()
-			attendanceData += fmt.Sprintf("<tr>%s<td>%d <a href='#' onclick=\"alert('%s')\"><i class='fa fa-info-circle'></i></a></td></tr>", rowHTML, margin.Hours, margin.Message)
-		}
-	}
-
-	tmpl, err := template.New("attendance").Parse(`<!DOCTYPE html>
-	<html lang="en">
-	<head>
-	    <meta charset="UTF-8">
-	    <title>Attendance Details</title>
-	    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/css/bootstrap.min.css">
-	    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/js/all.min.js"></script>
-	</head>
-	<body>
-	    <div class="container mt-5">
-	        <h2>Attendance Details</h2>
-	        <div class="table-responsive table-billing-history">
-	            <table class="table table-bordered">
-	                <thead class="table-light">
-	                    <tr>
-	                        <th scope="col">Code</th>
-	                        <th scope="col">Description</th>
-	                        <th scope="col">Max. hours</th>
-	                        <th scope="col">Att. hours</th>
-	                        <th scope="col">Absent hours</th>
-	                        <th scope="col">Average %</th>
-	                        <th scope="col">OD/ML Percentage</th>
-	                        <th scope="col">Total Percentage</th>
-	                        <th scope="col">Margin</th>
-	                    </tr>
-	                </thead>
-	                <tbody>
-	                    {{.}}
-	                </tbody>
-	            </table>
-	        </div>
-	    </div>
-	</body>
-	</html>`)
-	if err != nil {
-		http.Error(w, "Could not parse attendance template", http.StatusInternalServerError)
-		return
-	}
-	tmpl.Execute(w, template.HTML(attendanceData))
+	w.Write([]byte("Login submitted successfully."))
 }
 
-// Margin calculation
+// Utility for margin calculations
 type Margin struct {
 	Hours   int
 	Message string
@@ -324,33 +225,16 @@ func calculateMargin(att int, tot int) Margin {
 		for {
 			atp := (float32(att) / float32(tot+n)) * 100
 			if atp <= 76 {
-				return Margin{
-					Hours: n - 1,
-					Message: fmt.Sprintf(
-						"You can bunk %d more hours to get to %d / %d = %.2f%%",
-						n-1,
-						att,
-						tot+(n-1),
-						(float32(att) / float32(tot+(n-1)) * 100),
-					),
-				}
+				return Margin{Hours: n - 1, Message: fmt.Sprintf("You can miss %d hours to stay above 76%%.", n-1)}
 			}
 			n++
-		}
-	} else if initAtp >= 75 && initAtp < 76 {
-		return Margin{
-			Hours:   0,
-			Message: fmt.Sprintf("Your attendance is already between 75%% and 76%% at %.2f%%. Maintain this level to stay above 75%%.", initAtp),
 		}
 	} else {
 		n := 0
 		for {
 			atp := (float32(att+n) / float32(tot+n)) * 100
 			if atp >= 75 {
-				return Margin{
-					Hours:   n,
-					Message: fmt.Sprintf("You need to attend %d more hours to get to %d / %d = %.2f%%", n, att+n, tot+n, atp),
-				}
+				return Margin{Hours: n, Message: fmt.Sprintf("You need to attend %d hours to reach 75%%.", n)}
 			}
 			n++
 		}

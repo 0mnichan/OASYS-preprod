@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OASYS</title>
+    <script>
+        function reloadCaptcha() {
+            fetch('/reload_captcha', { method: 'POST' })
+                .then(response => {
+                    if (response.ok) {
+                        location.reload(); // Reload the page after CAPTCHA is updated
+                    } else {
+                        alert('Error reloading CAPTCHA');
+                    }
+                })
+                .catch(error => {
+                    alert(`Error reloading CAPTCHA: ${error.message}`);
+                });
+        }
+    </script>
+    
+    </script>
+</head>
+<body>
+    <h2>OASYS Login</h2>
+    <form action="/submit_login" method="POST">
+        <label for="netid">NetID (without '@srmist.edu.in')</label>
+        <input type="text" id="netid" name="netid" required>
+
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required>
+
+        <label for="captcha">Enter CAPTCHA</label>
+        <input type="text" id="captcha" name="captcha" required>
+        <br>
+        <img src="/static/captcha.jpg" alt="CAPTCHA Image">
+        <br>
+        <button type="button" onclick="reloadCaptcha()">Reload CAPTCHA</button>
+        <br>
+        <button type="submit">Login</button>
+    </form>
+</body>
+</html>

@@ -1,0 +1,8 @@
+# Ignore unnecessary files and directories
+node_modules
+.dockerignore
+Dockerfile
+*.log
+*.tmp
+*.env
+*.DS_Store
